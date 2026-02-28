@@ -10,7 +10,18 @@ import json
 from report_generator import generate_individual_report
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+# ─────────────────────────────────────────────
+# CORS SETUP
+# ─────────────────────────────────────────────
+CORS(app, supports_credentials=True)
+
+@app.after_request
+def after_request(response):
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+    return response
 
 UPLOAD_FOLDER = 'uploads'
 DATA_FILE = 'data.json'
@@ -59,7 +70,7 @@ def upload_pdf():
         if not data:
             return jsonify({"error": "Could not parse any employees from PDF. Check PDF format."}), 422
         STORE["raw_data"] = data
-        STORE["calculated_results"] = []  # reset old results on new upload
+        STORE["calculated_results"] = []
         return jsonify({
             "message": "Upload successful",
             "employees_detected": len(data),
@@ -79,7 +90,7 @@ def upload_excel():
     file = request.files['file']
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
-    
+
     if not file.filename.endswith(('.xlsx', '.xls')):
         return jsonify({"error": "Invalid file type. Please upload an Excel file."}), 400
 
@@ -90,7 +101,7 @@ def upload_excel():
         if not data:
             return jsonify({"error": "Could not parse any employees from Excel. Check file structure."}), 422
         STORE["raw_data"] = data
-        STORE["calculated_results"] = []  # reset old results on new upload
+        STORE["calculated_results"] = []
         return jsonify({
             "message": "Excel upload successful",
             "employees_detected": len(data),
@@ -105,7 +116,6 @@ def upload_excel():
 # ─────────────────────────────────────────────
 @app.route('/api/calculate', methods=['POST'])
 def calculate():
-    # FIX: safe fallback if json body missing or wrong content-type
     params = request.json or {}
     working_days = int(params.get("working_days", 25))
     hours_per_day = int(params.get("hours_per_day", 8))
@@ -119,12 +129,11 @@ def calculate():
         insights = generate_ml_insights(results)
         STORE["calculated_results"] = insights
         save_store(STORE)
-        
-        # Automatically send alerts after calculation
+
         recipient_email = params.get("recipient_email", "")
         alert_res = send_low_attendance_alert(insights, recipient_email)
         print(f"[AUTO-ALERT] Result: {alert_res}")
-        
+
         return jsonify(insights), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -137,7 +146,7 @@ def calculate():
 def send_alert():
     if not STORE["calculated_results"]:
         return jsonify({"error": "No results available. Please upload and calculate first."}), 400
-    
+
     params = request.json or {}
     recipient_email = params.get("recipient_email", "")
     res = send_low_attendance_alert(STORE["calculated_results"], recipient_email)
@@ -145,19 +154,18 @@ def send_alert():
 
 
 # ─────────────────────────────────────────────
-# TEST EMAIL — FORCES SEND REGARDLESS OF THRESHOLD
+# TEST EMAIL
 # ─────────────────────────────────────────────
 @app.route('/api/test-email', methods=['POST'])
 def test_email():
     params = request.json or {}
     recipient = params.get("recipient_email", "")
-    
-    # Dummy data for test
+
     test_data = [{
         "name": "TEST SYSTEM ALERT", "id": "TEST-001", "dept": "N/A",
         "attendance_pct": 25.0, "risk_score": 95, "pattern": "System Test"
     }]
-    
+
     res = send_low_attendance_alert(test_data, recipient)
     return jsonify(res), 200
 
@@ -171,12 +179,10 @@ def get_results():
 
 
 # ─────────────────────────────────────────────
-# SUMMARY — FIX: never return 400, always 200
+# SUMMARY
 # ─────────────────────────────────────────────
 @app.route('/api/summary', methods=['GET'])
 def get_summary():
-    # FIX: Return empty structure with 200 instead of 400
-    # This allows the Dashboard to load even before data is uploaded
     if not STORE["calculated_results"]:
         return jsonify({
             "total_employees": 0,
@@ -250,7 +256,6 @@ def export_bulk():
     try:
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED, False) as zip_file:
-            # Individual PDF reports
             for emp in STORE["calculated_results"]:
                 report_path = os.path.join(UPLOAD_FOLDER, f"temp_{emp['id']}.pdf")
                 generate_individual_report(emp, report_path)
@@ -258,7 +263,6 @@ def export_bulk():
                 if os.path.exists(report_path):
                     os.remove(report_path)
 
-            # Master Excel summary
             df = pd.DataFrame(STORE["calculated_results"])
             if 'records' in df.columns:
                 df = df.drop(columns=['records'])
@@ -304,4 +308,3 @@ if __name__ == "__main__":
         port=port,
         debug=False
     )
-    
