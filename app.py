@@ -10,7 +10,6 @@ import json
 from report_generator import generate_individual_report
 
 app = Flask(__name__)
-
 CORS(
     app,
     origins=[
