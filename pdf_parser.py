@@ -34,29 +34,23 @@ def parse_attendance_pdf(file_path):
                 continue
 
             # --- Attendance Rows ---
-            date_match = re.search(r"\d{2}-\d{2}-\d{4}", line)
+            date_time_match = re.search(
+                r"(\d{2}-\d{2}-\d{4}).*?(\d{2}:\d{2}).*?(\d{2}:\d{2}).*?(\d{2}:\d{2})",
+                line
+            )
 
-            if date_match and current_employee:
-                # Improved: Extract using whitespace positions (acts like columns)
-                parts = re.split(r"\s{2,}", line.strip())
-                times = [p for p in parts if re.match(r"\d{2}:\d{2}", p)]
+            if date_time_match and current_employee:
+                date_str = date_time_match.group(1)
+                in_time = date_time_match.group(2)
+                out_time = date_time_match.group(3)
+                total_time = date_time_match.group(4)
 
-                if len(times) >= 2:
-                    in_time = times[0]
-
-                    if len(times) == 2:
-                        out_time = times[1]
-                        total_time = "00:00"
-                    else:
-                        out_time = times[-2]
-                        total_time = times[-1]
-
-                    current_employee["records"].append({
-                        "date": date_match.group(),
-                        "in": in_time,
-                        "out": out_time,
-                        "total": total_time
-                    })
+                current_employee["records"].append({
+                    "date": date_str,
+                    "in": in_time,
+                    "out": out_time,
+                    "total": total_time
+                })
 
     return all_data
 
