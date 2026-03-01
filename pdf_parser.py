@@ -1,4 +1,3 @@
-from datetime import datetime
 from PyPDF2 import PdfReader
 import re
 
@@ -19,7 +18,7 @@ def parse_attendance_pdf(file_path):
 
             # --- Employee Detection ---
             emp_match = re.search(
-                r"Employee\s*Name\s*:\s*(.*?)\s*,\s*Employee\s*ID\s*:\s*(\w+)",
+                r"Employee\s*Name\s*:\s*(.*?)\s*,\s*Employee\s*ID\s*:\s*(\d+)",
                 line,
                 re.I
             )
@@ -34,18 +33,29 @@ def parse_attendance_pdf(file_path):
                 all_data.append(current_employee)
                 continue
 
-            # --- Attendance Row ---
+            # --- Attendance Rows ---
             date_match = re.search(r"\d{2}-\d{2}-\d{4}", line)
 
             if date_match and current_employee:
-                times = re.findall(r"\d{2}:\d{2}", line)
+                # Improved: Extract using whitespace positions (acts like columns)
+                parts = re.split(r"\s{2,}", line.strip())
+                times = [p for p in parts if re.match(r"\d{2}:\d{2}", p)]
 
-                if len(times) >= 3:
+                if len(times) >= 2:
+                    in_time = times[0]
+
+                    if len(times) == 2:
+                        out_time = times[1]
+                        total_time = "00:00"
+                    else:
+                        out_time = times[-2]
+                        total_time = times[-1]
+
                     current_employee["records"].append({
                         "date": date_match.group(),
-                        "in": times[0],
-                        "out": times[1],
-                        "total": times[2]
+                        "in": in_time,
+                        "out": out_time,
+                        "total": total_time
                     })
 
     return all_data
@@ -97,3 +107,4 @@ def calculate_metrics(employees, working_days=25, hours_per_day=8):
             "records": emp["records"]
         })
     return results
+
