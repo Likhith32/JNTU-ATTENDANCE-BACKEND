@@ -11,17 +11,16 @@ from report_generator import generate_individual_report
 
 app = Flask(__name__)
 
-# ─────────────────────────────────────────────
-# CORS SETUP
-# ─────────────────────────────────────────────
-CORS(app, supports_credentials=True)
+CORS(
+    app,
+    origins=[
+        "http://localhost:5173",
+        "https://attendance-pro-clyc.vercel.app"
+    ],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+)
 
-@app.after_request
-def after_request(response):
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
-    response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-    return response
 
 UPLOAD_FOLDER = 'uploads'
 DATA_FILE = 'data.json'
