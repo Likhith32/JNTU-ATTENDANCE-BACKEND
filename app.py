@@ -129,9 +129,10 @@ def calculate():
         STORE["calculated_results"] = insights
         save_store(STORE)
 
-        recipient_email = params.get("recipient_email", "")
-        alert_res = send_low_attendance_alert(insights, recipient_email)
-        print(f"[AUTO-ALERT] Result: {alert_res}")
+        # recipient_email = params.get("recipient_email", "")
+        # alert_res = send_low_attendance_alert(insights, recipient_email)
+        # print(f"[AUTO-ALERT] Result: {alert_res}")
+        print("Skipping auto email in production")
 
         return jsonify(insights), 200
     except Exception as e:
