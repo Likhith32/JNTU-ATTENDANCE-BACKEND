@@ -37,7 +37,7 @@ def parse_attendance_pdf(file_path):
             date_match = re.search(r"\d{2}-\d{2}-\d{4}", line)
 
             if date_match and current_employee:
-                times = re.findall(r"\d{2}:\d{2}", line)
+                times = re.findall(r"\d{1,2}:\d{2}", line)
 
                 if len(times) >= 2:
                     in_time = times[0]
