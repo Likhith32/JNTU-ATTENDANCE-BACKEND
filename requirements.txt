@@ -1,7 +1,7 @@
 ﻿flask
 flask-cors
 pandas
-pdfplumber
+PyPDF2
 openpyxl
 python-dotenv
 scikit-learn
