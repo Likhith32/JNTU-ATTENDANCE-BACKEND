@@ -1,6 +1,10 @@
 from PyPDF2 import PdfReader
 import re
 
+def peek(lines, i, offset):
+    idx = i + offset
+    return lines[idx] if idx < len(lines) else ""
+
 def parse_attendance_pdf(file_path):
     all_data = []
     reader = PdfReader(file_path)
@@ -11,14 +15,12 @@ def parse_attendance_pdf(file_path):
         if not text:
             continue
 
-        # Build clean list of non-empty lines
         lines = [l.strip() for l in text.split("\n") if l.strip()]
-
         i = 0
+
         while i < len(lines):
             line = lines[i]
 
-            # ── Employee header ──────────────────────────────────────
             emp_match = re.search(
                 r"Employee\s+Name\s*:\s*(.+?)\s*,\s*Employee\s+ID\s*:\s*(\d+)",
                 line, re.IGNORECASE
@@ -31,7 +33,6 @@ def parse_attendance_pdf(file_path):
                 )
                 if dept_match:
                     dept = dept_match.group(1).strip()
-
                 current_employee = {
                     "name": emp_match.group(1).strip(),
                     "id":   emp_match.group(2).strip(),
@@ -42,38 +43,23 @@ def parse_attendance_pdf(file_path):
                 i += 1
                 continue
 
-            # ── Attendance row ────────────────────────────────────────
-            # DATE is alone on its own line, followed by:
-            # next line = Weekday, then In, Out, Total each on own line
             if re.match(r"^\d{2}-\d{2}-\d{4}$", line) and current_employee is not None:
                 date_str = line
+                in_time  = peek(lines, i, 2)
+                out_time = peek(lines, i, 3)
+                total    = peek(lines, i, 4)
 
-                # Peek at next lines safely
-                def peek(offset):
-                    idx = i + offset
-                    return lines[idx] if idx < len(lines) else ""
-
-                weekday  = peek(1)  # e.g. "Monday"
-                in_time  = peek(2)  # e.g. "08:04"
-                out_time = peek(3)  # e.g. "10:30"
-                total    = peek(4)  # e.g. "02:26"
-
-                # Validate they look like times HH:MM
                 time_re = re.compile(r"^\d{1,2}:\d{2}$")
 
                 if time_re.match(in_time) and time_re.match(out_time) and time_re.match(total):
-                    # All 3 times present — normal row
                     current_employee["records"].append({
-                        "date":  date_str,
-                        "in":    in_time,
-                        "out":   out_time,
-                        "total": total
+                        "date": date_str, "in": in_time,
+                        "out": out_time,  "total": total
                     })
-                    i += 5  # skip date + weekday + in + out + total
+                    i += 5
                     continue
 
                 elif time_re.match(in_time) and time_re.match(out_time):
-                    # Total missing — calculate it
                     try:
                         ih, im = map(int, in_time.split(":"))
                         oh, om = map(int, out_time.split(":"))
@@ -82,21 +68,16 @@ def parse_attendance_pdf(file_path):
                     except Exception:
                         total = "00:00"
                     current_employee["records"].append({
-                        "date":  date_str,
-                        "in":    in_time,
-                        "out":   out_time,
-                        "total": total
+                        "date": date_str, "in": in_time,
+                        "out": out_time,  "total": total
                     })
-                    i += 4  # skip date + weekday + in + out
+                    i += 4
                     continue
 
                 else:
-                    # No punches — absent day
                     current_employee["records"].append({
-                        "date":  date_str,
-                        "in":    "00:00",
-                        "out":   "00:00",
-                        "total": "00:00"
+                        "date": date_str, "in": "00:00",
+                        "out": "00:00",   "total": "00:00"
                     })
                     i += 1
                     continue
@@ -105,11 +86,12 @@ def parse_attendance_pdf(file_path):
 
     return all_data
 
+
 def calculate_metrics(employees, working_days=25, hours_per_day=8):
     target_hours = working_days * hours_per_day
     results = []
     for emp in employees:
-        valid_records = [r for r in emp["records"] if r["total"] != "00:00" and r["total"] != "00:00:00"]
+        valid_records = [r for r in emp["records"] if r["total"] not in ("00:00", "00:00:00")]
         actual_minutes = 0
         arrival_minutes = []
         departure_minutes = []
@@ -134,6 +116,14 @@ def calculate_metrics(employees, working_days=25, hours_per_day=8):
             avg_departure = f"{avg_d_min // 60:02d}:{avg_d_min % 60:02d}"
         late_days = sum(1 for r in valid_records if int(r["in"].split(":")[0]) >= 10)
         early_leave = sum(1 for r in valid_records if int(r["out"].split(":")[0]) < 17)
+
+        if attendance_pct >= 95:        status = "Exceptional"
+        elif attendance_pct >= 85:      status = "Excellent"
+        elif attendance_pct >= 75:      status = "Good"
+        elif attendance_pct >= 60:      status = "Warning"
+        elif attendance_pct >= 40:      status = "Critical"
+        else:                           status = "Severe"
+
         results.append({
             "name": emp["name"],
             "id": emp["id"],
@@ -149,6 +139,9 @@ def calculate_metrics(employees, working_days=25, hours_per_day=8):
             "avg_departure": avg_departure,
             "late_days": late_days,
             "early_leave_days": early_leave,
-            "records": emp["records"]
+            "records": emp["records"],
+            "status": status,
+            "pattern": "N/A",
+            "risk_score": 0
         })
     return results
