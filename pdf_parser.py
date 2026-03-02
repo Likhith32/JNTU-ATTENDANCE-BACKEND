@@ -6,38 +6,24 @@ def parse_attendance_pdf(file_path):
     reader = PdfReader(file_path)
     current_employee = None
 
-    for page_num, page in enumerate(reader.pages):
+    for page in reader.pages:
         text = page.extract_text()
         if not text:
             continue
 
-        # ✅ ADD THIS - print first 2 pages raw text to see exact format
-        if page_num < 2:
-            print(f"\n===== PAGE {page_num} RAW TEXT =====")
-            for i, line in enumerate(text.split("\n")):
-                print(f"  LINE {i:03d}: '{line}'")
-            print("=" * 50)
+        # Build clean list of non-empty lines
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-        lines = text.split("\n")
+        i = 0
+        while i < len(lines):
+            line = lines[i]
 
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-
-            # -------------------------------------------------------
-            # EMPLOYEE HEADER DETECTION
-            # Format: "Employee Name : NARAYANA RAO GANTEDA , Employee ID : 1002, Gender : , Department : Out Sourcing, Position : position"
-            # -------------------------------------------------------
+            # ── Employee header ──────────────────────────────────────
             emp_match = re.search(
                 r"Employee\s+Name\s*:\s*(.+?)\s*,\s*Employee\s+ID\s*:\s*(\d+)",
                 line, re.IGNORECASE
             )
             if emp_match:
-                name = emp_match.group(1).strip()
-                emp_id = emp_match.group(2).strip()
-
-                # Department: stop before ", Position"
                 dept = "General"
                 dept_match = re.search(
                     r"Department\s*:\s*(.+?)(?:\s*,\s*Position|\s*$)",
@@ -47,65 +33,75 @@ def parse_attendance_pdf(file_path):
                     dept = dept_match.group(1).strip()
 
                 current_employee = {
-                    "name": name,
-                    "id": emp_id,
+                    "name": emp_match.group(1).strip(),
+                    "id":   emp_match.group(2).strip(),
                     "dept": dept,
                     "records": []
                 }
                 all_data.append(current_employee)
+                i += 1
                 continue
 
-            # -------------------------------------------------------
-            # ATTENDANCE ROW DETECTION
-            # Format: "26-01-2026 Monday 08:04 10:30 02:26"
-            # Columns: Date | Weekday | First Punch | Last Punch | Total Time
-            # (IN Temp and OUT Temp columns are always empty — ignored)
-            # -------------------------------------------------------
-            date_match = re.match(r"^(\d{2}-\d{2}-\d{4})\b", line)
-            if date_match and current_employee is not None:
-                date_str = date_match.group(1)
+            # ── Attendance row ────────────────────────────────────────
+            # DATE is alone on its own line, followed by:
+            # next line = Weekday, then In, Out, Total each on own line
+            if re.match(r"^\d{2}-\d{2}-\d{4}$", line) and current_employee is not None:
+                date_str = line
 
-                # Extract all HH:MM time patterns from the line
-                # \b boundary ensures we don't match partial numbers
-                times = re.findall(r"\b(\d{1,2}:\d{2})\b", line)
+                # Peek at next lines safely
+                def peek(offset):
+                    idx = i + offset
+                    return lines[idx] if idx < len(lines) else ""
 
-                if len(times) >= 3:
-                    # Best case: First Punch, Last Punch, Total Time all present
-                    in_time    = times[0]
-                    out_time   = times[1]
-                    total_time = times[2]
+                weekday  = peek(1)  # e.g. "Monday"
+                in_time  = peek(2)  # e.g. "08:04"
+                out_time = peek(3)  # e.g. "10:30"
+                total    = peek(4)  # e.g. "02:26"
 
-                elif len(times) == 2:
-                    # Total Time missing — calculate from First and Last Punch
-                    in_time  = times[0]
-                    out_time = times[1]
+                # Validate they look like times HH:MM
+                time_re = re.compile(r"^\d{1,2}:\d{2}$")
+
+                if time_re.match(in_time) and time_re.match(out_time) and time_re.match(total):
+                    # All 3 times present — normal row
+                    current_employee["records"].append({
+                        "date":  date_str,
+                        "in":    in_time,
+                        "out":   out_time,
+                        "total": total
+                    })
+                    i += 5  # skip date + weekday + in + out + total
+                    continue
+
+                elif time_re.match(in_time) and time_re.match(out_time):
+                    # Total missing — calculate it
                     try:
                         ih, im = map(int, in_time.split(":"))
                         oh, om = map(int, out_time.split(":"))
-                        diff_mins = (oh * 60 + om) - (ih * 60 + im)
-                        diff_mins = max(diff_mins, 0)
-                        total_time = f"{diff_mins // 60:02d}:{diff_mins % 60:02d}"
+                        diff = max((oh * 60 + om) - (ih * 60 + im), 0)
+                        total = f"{diff // 60:02d}:{diff % 60:02d}"
                     except Exception:
-                        total_time = "00:00"
-
-                elif len(times) == 1:
-                    # Single punch only (like "17:14 17:14 00:00" anomaly rows)
-                    in_time    = times[0]
-                    out_time   = times[0]
-                    total_time = "00:00"
+                        total = "00:00"
+                    current_employee["records"].append({
+                        "date":  date_str,
+                        "in":    in_time,
+                        "out":   out_time,
+                        "total": total
+                    })
+                    i += 4  # skip date + weekday + in + out
+                    continue
 
                 else:
-                    # No punches at all — absent day
-                    in_time    = "00:00"
-                    out_time   = "00:00"
-                    total_time = "00:00"
+                    # No punches — absent day
+                    current_employee["records"].append({
+                        "date":  date_str,
+                        "in":    "00:00",
+                        "out":   "00:00",
+                        "total": "00:00"
+                    })
+                    i += 1
+                    continue
 
-                current_employee["records"].append({
-                    "date":  date_str,
-                    "in":    in_time,
-                    "out":   out_time,
-                    "total": total_time
-                })
+            i += 1
 
     return all_data
 
