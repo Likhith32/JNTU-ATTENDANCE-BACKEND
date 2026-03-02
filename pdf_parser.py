@@ -6,10 +6,17 @@ def parse_attendance_pdf(file_path):
     reader = PdfReader(file_path)
     current_employee = None
 
-    for page in reader.pages:
+    for page_num, page in enumerate(reader.pages):
         text = page.extract_text()
         if not text:
             continue
+
+        # ✅ ADD THIS - print first 2 pages raw text to see exact format
+        if page_num < 2:
+            print(f"\n===== PAGE {page_num} RAW TEXT =====")
+            for i, line in enumerate(text.split("\n")):
+                print(f"  LINE {i:03d}: '{line}'")
+            print("=" * 50)
 
         lines = text.split("\n")
 
