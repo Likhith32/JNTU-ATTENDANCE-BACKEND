@@ -4,7 +4,6 @@ import re
 def parse_attendance_pdf(file_path):
     all_data = []
     reader = PdfReader(file_path)
-
     current_employee = None
 
     for page in reader.pages:
@@ -15,46 +14,91 @@ def parse_attendance_pdf(file_path):
         lines = text.split("\n")
 
         for line in lines:
+            line = line.strip()
+            if not line:
+                continue
 
-            # --- Employee Detection ---
+            # -------------------------------------------------------
+            # EMPLOYEE HEADER DETECTION
+            # Format: "Employee Name : NARAYANA RAO GANTEDA , Employee ID : 1002, Gender : , Department : Out Sourcing, Position : position"
+            # -------------------------------------------------------
             emp_match = re.search(
-                r"Employee\s*Name\s*:\s*(.*?)\s*,\s*Employee\s*ID\s*:\s*(\d+)",
-                line,
-                re.I
+                r"Employee\s+Name\s*:\s*(.+?)\s*,\s*Employee\s+ID\s*:\s*(\d+)",
+                line, re.IGNORECASE
             )
-
             if emp_match:
+                name = emp_match.group(1).strip()
+                emp_id = emp_match.group(2).strip()
+
+                # Department: stop before ", Position"
+                dept = "General"
+                dept_match = re.search(
+                    r"Department\s*:\s*(.+?)(?:\s*,\s*Position|\s*$)",
+                    line, re.IGNORECASE
+                )
+                if dept_match:
+                    dept = dept_match.group(1).strip()
+
                 current_employee = {
-                    "name": emp_match.group(1).strip(),
-                    "id": emp_match.group(2).strip(),
-                    "dept": "General",
+                    "name": name,
+                    "id": emp_id,
+                    "dept": dept,
                     "records": []
                 }
                 all_data.append(current_employee)
                 continue
 
-            # --- Attendance Rows ---
-            date_match = re.search(r"\d{2}-\d{2}-\d{4}", line)
+            # -------------------------------------------------------
+            # ATTENDANCE ROW DETECTION
+            # Format: "26-01-2026 Monday 08:04 10:30 02:26"
+            # Columns: Date | Weekday | First Punch | Last Punch | Total Time
+            # (IN Temp and OUT Temp columns are always empty — ignored)
+            # -------------------------------------------------------
+            date_match = re.match(r"^(\d{2}-\d{2}-\d{4})\b", line)
+            if date_match and current_employee is not None:
+                date_str = date_match.group(1)
 
-            if date_match and current_employee:
-                times = re.findall(r"\d{1,2}:\d{2}", line)
+                # Extract all HH:MM time patterns from the line
+                # \b boundary ensures we don't match partial numbers
+                times = re.findall(r"\b(\d{1,2}:\d{2})\b", line)
 
-                if len(times) >= 2:
-                    in_time = times[0]
+                if len(times) >= 3:
+                    # Best case: First Punch, Last Punch, Total Time all present
+                    in_time    = times[0]
+                    out_time   = times[1]
+                    total_time = times[2]
 
-                    if len(times) == 2:
-                        out_time = times[1]
+                elif len(times) == 2:
+                    # Total Time missing — calculate from First and Last Punch
+                    in_time  = times[0]
+                    out_time = times[1]
+                    try:
+                        ih, im = map(int, in_time.split(":"))
+                        oh, om = map(int, out_time.split(":"))
+                        diff_mins = (oh * 60 + om) - (ih * 60 + im)
+                        diff_mins = max(diff_mins, 0)
+                        total_time = f"{diff_mins // 60:02d}:{diff_mins % 60:02d}"
+                    except Exception:
                         total_time = "00:00"
-                    else:
-                        out_time = times[-2]
-                        total_time = times[-1]
 
-                    current_employee["records"].append({
-                        "date": date_match.group(),
-                        "in": in_time,
-                        "out": out_time,
-                        "total": total_time
-                    })
+                elif len(times) == 1:
+                    # Single punch only (like "17:14 17:14 00:00" anomaly rows)
+                    in_time    = times[0]
+                    out_time   = times[0]
+                    total_time = "00:00"
+
+                else:
+                    # No punches at all — absent day
+                    in_time    = "00:00"
+                    out_time   = "00:00"
+                    total_time = "00:00"
+
+                current_employee["records"].append({
+                    "date":  date_str,
+                    "in":    in_time,
+                    "out":   out_time,
+                    "total": total_time
+                })
 
     return all_data
 
@@ -105,4 +149,3 @@ def calculate_metrics(employees, working_days=25, hours_per_day=8):
             "records": emp["records"]
         })
     return results
-
